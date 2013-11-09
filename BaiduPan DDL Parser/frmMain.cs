@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using mshtml;
+using System.IO;
 
 namespace BaiduPan_DDL_Parser {
 	public partial class frmMain : Form {
@@ -49,6 +50,22 @@ namespace BaiduPan_DDL_Parser {
 
 		private void frmMain_Load(object sender, EventArgs e) {
 			this.webLogs.DocumentCompleted += webLogs_DocumentCompleted;
+
+			var fsWatcher = new FileSystemWatcher(@"Z:\Game\osu!\Songs\", "*.*");
+			fsWatcher.Changed += fsWatcher_Changed;
+			fsWatcher.Created += fsWatcher_Created;
+			fsWatcher.IncludeSubdirectories = true;
+			fsWatcher.NotifyFilter = NotifyFilters.LastAccess;
+			fsWatcher.EnableRaisingEvents = true;
+		}
+
+		void fsWatcher_Created(object sender, FileSystemEventArgs e) {
+			Debug.WriteLine("fsWatcher_Created: " + e.FullPath);
+		}
+
+		void fsWatcher_Changed(object sender, FileSystemEventArgs e) {
+			Debug.WriteLine("fsWatcher_Changed: " + e.FullPath);
+			//throw new NotImplementedException();
 		}
 
 		private void frmMain_Shown(object sender, EventArgs e) {
@@ -65,34 +82,36 @@ namespace BaiduPan_DDL_Parser {
 			var client = new System.Net.WebClient();
 			client.Encoding = System.Text.Encoding.UTF8;
 			var data = client.DownloadString(editURL.Text);
-			var m = Regex.Matches(data, "_dlink=\"(h.+?)\"");
-			if (m.Count == 0) {
-				appendLog("解析错误: 无法匹配到链接", "red");
+			string dlLink, serverFilename;
+
+			try {
+				serverFilename = Regex.Match(data, @"server_filename=""(.+?)""").Groups[1].ToString();
+				var jsonData = client.DownloadString(string.Format(
+					"http://pan.baidu.com/share/download?bdstoken={0}&uk={1}&shareid={2}&fid_list=%5B{3}%5D",
+					Regex.Match(data, @"bdstoken=""(.+?)""").Groups[1].ToString(),
+					Regex.Match(data, @"share_uk=""(.+?)""").Groups[1].ToString(),
+					Regex.Match(data, @"share_id=""(.+?)""").Groups[1].ToString(),
+					Regex.Match(data, @"fsId=""(.+?)""").Groups[1].ToString()
+				));
+				dlLink = Regex.Match(jsonData, @"dlink"":""(h.+?)""").Groups[1].ToString().Replace(@"\", "");
+				if (dlLink.Substring(0, 1) != "h")
+					throw new Exception("链接无效");
+			} catch (Exception) {
+				appendLog("解析错误: 无匹配链接", "red");
 				return;
 			}
 
-			var m2 = Regex.Match(data, @"server_filename=""(.+?)""");
+			HtmlElement tmp = logDoc.CreateElement("a");
+			HtmlElement inp = logDoc.CreateElement("input");
+			((IHTMLInputElement)inp.DomElement).readOnly = true;
 
-			appendLog(string.Format("档案 <span class=\"file\">{1}</span> 共发现 <span class=\"red\">{0}</span> 个下载线路:",
-				m.Count.ToString(),
-				m2.Groups[1].Value
-			));
-
-			for (int i = 0; i < m.Count; i++) {
-				HtmlElement tmp = logDoc.CreateElement("a");
-				HtmlElement inp = logDoc.CreateElement("input");
-				((IHTMLInputElement)inp.DomElement).readOnly = true;
-
-				var link = m[i].Groups[1].Value;
-				tmp.SetAttribute("href", link);
-				// tmp.SetAttribute("target", "_blank");
-				tmp.InnerText = string.Format("下载线路{0}", (i + 1).ToString());
-				inp.InnerText = link;
-				logDoc.Body.AppendChild(tmp);
-				logDoc.Body.AppendChild(inp);
-				logDoc.Body.AppendChild(logDoc.CreateElement("br"));
-				Debug.WriteLine( m[i].Groups[1].Value );
-			}
+			tmp.SetAttribute("href", dlLink);
+			// tmp.SetAttribute("target", "_blank");
+			tmp.InnerHtml = string.Format("点我下载 <span class=\"file\">{0}</span>", serverFilename);
+			inp.InnerText = dlLink;
+			logDoc.Body.AppendChild(tmp);
+			logDoc.Body.AppendChild(inp);
+			logDoc.Body.AppendChild(logDoc.CreateElement("br"));
 		}
 
 		void getData_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e) {
