@@ -50,22 +50,6 @@ namespace BaiduPan_DDL_Parser {
 
 		private void frmMain_Load(object sender, EventArgs e) {
 			this.webLogs.DocumentCompleted += webLogs_DocumentCompleted;
-
-			var fsWatcher = new FileSystemWatcher(@"Z:\Game\osu!\Songs\", "*.*");
-			fsWatcher.Changed += fsWatcher_Changed;
-			fsWatcher.Created += fsWatcher_Created;
-			fsWatcher.IncludeSubdirectories = true;
-			fsWatcher.NotifyFilter = NotifyFilters.LastAccess;
-			fsWatcher.EnableRaisingEvents = true;
-		}
-
-		void fsWatcher_Created(object sender, FileSystemEventArgs e) {
-			Debug.WriteLine("fsWatcher_Created: " + e.FullPath);
-		}
-
-		void fsWatcher_Changed(object sender, FileSystemEventArgs e) {
-			Debug.WriteLine("fsWatcher_Changed: " + e.FullPath);
-			//throw new NotImplementedException();
 		}
 
 		private void frmMain_Shown(object sender, EventArgs e) {
@@ -78,6 +62,23 @@ namespace BaiduPan_DDL_Parser {
 			getData.RunWorkerCompleted += getData_RunWorkerCompleted;
 		}
 
+		// http://www.hanselman.com/blog/HTTPPOSTsAndHTTPGETsWithWebClientAndCAndFakingAPostBack.aspx
+		public static string doPost (string URI, string Parameters = "") {
+			System.Net.WebRequest req = System.Net.WebRequest.Create(URI);
+			req.ContentType = "application/x-www-form-urlencoded";
+			req.Method = "POST";
+			//We need to count how many bytes we're sending. Post'ed Faked Forms should be name=value&
+			byte[] bytes = System.Text.Encoding.ASCII.GetBytes(Parameters);
+			req.ContentLength = bytes.Length;
+			System.IO.Stream os = req.GetRequestStream();
+			os.Write(bytes, 0, bytes.Length); //Push it out there
+			os.Close();
+			System.Net.WebResponse resp = req.GetResponse();
+			if (resp == null) return null;
+			System.IO.StreamReader sr = new System.IO.StreamReader(resp.GetResponseStream());
+			return sr.ReadToEnd().Trim();
+		}
+
 		void getData_DoWork(object sender, DoWorkEventArgs e) {
 			var client = new System.Net.WebClient();
 			client.Encoding = System.Text.Encoding.UTF8;
@@ -86,13 +87,21 @@ namespace BaiduPan_DDL_Parser {
 
 			try {
 				serverFilename = Regex.Match(data, @"server_filename=""(.+?)""").Groups[1].ToString();
-				var jsonData = client.DownloadString(string.Format(
-					"http://pan.baidu.com/share/download?bdstoken={0}&uk={1}&shareid={2}&fid_list=%5B{3}%5D",
+				// http://pan.baidu.com/share/download?channel=chunlei&clienttype=0&web=1&uk=1862387175&shareid=2026277506&timestamp=1389130853&sign=7ab72d209fbed4f2a55d13a9388eb5679d8db334&bdstoken=2e32701a9fc4f12eb5a12db78dea698e&channel=chunlei&clienttype=0&web=1
+
+				var jsonData = doPost(string.Format(
+					"http://pan.baidu.com/share/download?bdstoken={0}&uk={1}&shareid={2}&sign={3}&timestamp={4}",
 					Regex.Match(data, @"bdstoken=""(.+?)""").Groups[1].ToString(),
 					Regex.Match(data, @"share_uk=""(.+?)""").Groups[1].ToString(),
 					Regex.Match(data, @"share_id=""(.+?)""").Groups[1].ToString(),
+					Regex.Match(data, @"share_sign=""(.+?)""").Groups[1].ToString(),
+					Regex.Match(data, @"share_timestamp=""(.+?)""").Groups[1].ToString()
+				), string.Format (
+					"fid_list=%5B%22{0}%22%5D",
 					Regex.Match(data, @"fsId=""(.+?)""").Groups[1].ToString()
 				));
+
+				appendLog(jsonData);
 				dlLink = Regex.Match(jsonData, @"dlink"":""(h.+?)""").Groups[1].ToString().Replace(@"\", "");
 				if (dlLink.Substring(0, 1) != "h")
 					throw new Exception("链接无效");
